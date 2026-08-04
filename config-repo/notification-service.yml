@@ -26,9 +26,6 @@ spring:
             enable: true
             required: true
 
-server:
-  port: 2312
-
 eureka:
   client:
     service-url:
