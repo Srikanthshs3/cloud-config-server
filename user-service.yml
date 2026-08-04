@@ -1,0 +1,73 @@
+spring:
+  # Changed from localhost to mysql-user
+  datasource:
+    url: jdbc:mysql://localhost:3306/user_service
+    username: root
+    password: Admin@123
+  jpa:
+    hibernate:
+      ddl-auto: update
+  properties:
+    hibernate:
+      dialect: org.hibernate.dialect.MySQLDialect
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
+
+  # Changed from localhost to redis
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+
+  # Disable MongoDB auto-configuration since you commented out the URI
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration, org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://${EUREKA_HOST:localhost}:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+secreteJwtString: adfnkgndsfvndnscsodvndvndkvnknvkdfsnkjdsnvdfnnd
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakers, prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http:
+          server:
+            requests: true
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      # Default to localhost for IDE, override via ENV var in Docker Compose
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+# Loki URL needs to point to the Loki container
+loki:
+  # Default to localhost for IDE, override via ENV var in Docker Compose
+  url: ${LOKI_URL:http://localhost:3100/loki/api/v1/push}
+
+logging:
+  level:
+    org.apache.kafka.clients.NetworkClient: ERROR
+  pattern:
+    level: "%5p [user-service,%X{traceId:-},%X{spanId:-}]"
