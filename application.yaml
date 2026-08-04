@@ -1,14 +1,44 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, metrics, circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http:
+          server:
+            requests: true
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://localhost:9411/api/v2/spans}
+  tracing:
+    sampling:
+      probability: 1.0
+
+# Flexible fallback added
+loki:
+  url: ${LOKI_URL:http://localhost:3100/loki/api/v1/push}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-}]"
+  level:
+    root: INFO
+    com.praskanth: DEBUG
+
 eureka:
   client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
     fetch-registry: true
     register-with-eureka: true
-    serviceUrl:
-      defaultZone: http://localhost:8761/eureka/
   instance:
-    hostname: localhost    
-
-microservice:
-  user-service:
-    endpoints:
-      endpoint:
-        uri: http://user-service/api/v1/**
+    prefer-ip-address: true
