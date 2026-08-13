@@ -4,7 +4,11 @@ spring:
     url: jdbc:mysql://localhost:3306/user_service
     username: root
     password: Admin@123
+  sql:
+    init:
+      mode: always
   jpa:
+    defer-datasource-initialization: true
     hibernate:
       ddl-auto: update
   properties:
