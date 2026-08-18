@@ -12,7 +12,7 @@ spring:
         - name: CircuitBreaker
           args:
             name: defaultCircuitBreaker
-            fallbackUri: forward:/fallback
+            #fallbackUri: forward:/fallback
       routes:
         - id: user-service
           uri: lb://user-service
