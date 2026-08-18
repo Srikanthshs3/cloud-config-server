@@ -43,3 +43,4 @@ eureka:
   instance:
     prefer-ip-address: true
     hostname: localhost
+    instance-id: ${spring.application.name}:${server.port}
