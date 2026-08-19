@@ -10,10 +10,6 @@ spring:
     properties:
       schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
 
-user:
-  api:
-    url: http://user-service
-
 eureka:
   client:
     service-url:
