@@ -30,7 +30,26 @@ spring:
           uri: lb://CATEGORY-SERVICE
           predicates:
             - Path=/api/v1/category/**
-
+        - id: CART-SERVICE
+          uri: lb://CART-SERVICE
+          predicates:
+            - Path=/api/v1/cart/**
+        - id: INVENTORY-SERVICE
+          uri: lb://INVENTORY-SERVICE
+          predicates:
+            - Path=/api/v1/inventory/**
+        - id: ORDER-SERVICE
+          uri: lb://ORDER-SERVICE
+          predicates:
+            - Path=/api/v1/order/**
+        - id: PAYMENT-SERVICE
+          uri: lb://PAYMENT-SERVICE
+          predicates:
+            - Path=/api/v1/payment/**
+        - id: SHIPPING-SERVICE
+          uri: lb://SHIPPING-SERVICE
+          predicates:
+            - Path=/api/v1/shipping/**
 
 security:
   public-paths:
