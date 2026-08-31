@@ -5,6 +5,21 @@ spring:
       port: ${REDIS_PORT:6379}
       timeout: 2000ms
 
+  datasource:
+    url: jdbc:mysql://localhost:3306/cart_db
+    username: root
+    password: Admin@123
+  sql:
+    init:
+      mode: always
+  jpa:
+    defer-datasource-initialization: true
+    hibernate:
+      ddl-auto: update
+  properties:
+    hibernate:
+      dialect: org.hibernate.dialect.MySQLDialect
+
 eureka:
   client:
     service-url:
