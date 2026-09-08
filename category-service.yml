@@ -6,7 +6,7 @@ spring:
       database: category-service
 
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
     properties:
       schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
 
@@ -86,6 +86,6 @@ resilience4j:
 
 logging:
   level:
-    root: INFO
+    org.apache.kafka.clients.NetworkClient: ERROR
   pattern:
     level: "%5p [product-service,%X{traceId:-},%X{spanId:-}]"
