@@ -2,10 +2,12 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, info, mappings, prometheus, metrics, circuitbreakers
+        include: health, info, mappings, gateway, prometheus, metrics, circuitbreakers
   endpoint:
     health:
       show-details: always
+    gateway:
+      enabled: true
       probes:
         enabled: true
   metrics:

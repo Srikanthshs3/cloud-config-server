@@ -91,3 +91,14 @@ resilience4j:
       default:
         maxAttempts: 3
         waitDuration: 2s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      enabled: true
