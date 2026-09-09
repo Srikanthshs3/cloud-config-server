@@ -37,11 +37,14 @@ management:
     enable:
       mongodb: false
       mongodb.driver: false
+    binders:
+      mongodb:
+        enabled: false
     distribution:
       percentiles-histogram:
         http:
           server:
-            requests: true
+            requests: false
   observations:
     key-values:
       application: ${spring.application.name}
