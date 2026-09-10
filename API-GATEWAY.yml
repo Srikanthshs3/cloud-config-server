@@ -58,6 +58,7 @@ eureka:
     register-with-eureka: true
   instance:
     prefer-ip-address: true
+    ip-address: 127.0.0.1
 
 security:
   public-paths:
