@@ -49,6 +49,14 @@ spring:
           uri: lb://SHIPPING-SERVICE
           predicates:
             - Path=/api/v1/shipping/**
+        - id: coupon-service-route
+          uri: lb://COUPON-SERVICE
+          predicates:
+            - Path=/api/v1/coupon/**
+        - id: review-service-route
+          uri: lb://REVIEW-SERVICE
+          predicates:
+            - Path=/api/v1/review/**
 
 eureka:
   client:
