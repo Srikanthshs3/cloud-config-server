@@ -71,10 +71,14 @@ eureka:
 security:
   public-paths:
     - /api/v1/auth/**
-    - /api/v1/product/**
-    - /api/v1/category/**
+    - GET /api/v1/product/**            # CHANGED: reads only (writes need a token)
+    - GET /api/v1/category/**           # CHANGED: reads only
+    - POST /api/v1/sellers/register     # NEW: seller sign-up
+    - GET /api/v1/sellers/*/public      # NEW: public store page
+    - GET /api/v1/review/**             # NEW: anyone can read reviews and pictures
     - /fallback
-    - /actuator/**
+    - /actuator/health/**               # CHANGED: was /actuator/** (exposed the gateway's route list)
+    - /actuator/prometheus
 
 secreteJwtString: ${JWT_SECRET:adfnkgndsfvndnscsodvndvndkvnknvkdfsnkjdsnvdfnnd}
 
