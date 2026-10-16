@@ -16,6 +16,7 @@ spring:
         - id: user-service-route
           uri: lb://USER-SERVICE
           predicates:
+            # CHANGED: added /api/v1/sellers/** (seller register / profile / admin KYC review)
             - Path=/api/v1/auth/**,/api/v1/user/**,/api/v1/address/**,/api/v1/sellers/**
         - id: notification-service-route
           uri: lb://NOTIFICATION-SERVICE
@@ -69,6 +70,7 @@ eureka:
     ip-address: 127.0.0.1
 
 security:
+  # Entry syntax: "[METHOD ]ant-pattern". A valid token is still honoured on these paths.
   public-paths:
     - /api/v1/auth/**
     - GET /api/v1/product/**            # CHANGED: reads only (writes need a token)
@@ -76,6 +78,7 @@ security:
     - POST /api/v1/sellers/register     # NEW: seller sign-up
     - GET /api/v1/sellers/*/public      # NEW: public store page
     - GET /api/v1/review/**             # NEW: anyone can read reviews and pictures
+    - POST /api/v1/payment/webhooks/**   # NEW: Razorpay/Stripe call this; the signature is the authentication
     - /fallback
     - /actuator/health/**               # CHANGED: was /actuator/** (exposed the gateway's route list)
     - /actuator/prometheus
