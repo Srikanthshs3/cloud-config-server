@@ -78,6 +78,7 @@ security:
     - GET /api/v1/category/**           # CHANGED: reads only
     - POST /api/v1/sellers/register     # NEW: seller sign-up
     - GET /api/v1/sellers/*/public      # NEW: public store page
+    - POST /api/v1/delivery-agents/register
     - GET /api/v1/review/**             # NEW: anyone can read reviews and pictures
     - POST /api/v1/payment/webhooks/**   # NEW: Razorpay/Stripe call this; the signature is the authentication
     - /fallback
