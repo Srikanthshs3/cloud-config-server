@@ -1,4 +1,21 @@
+# =====================================================================================================================
+#  API gateway: routing + EDGE resilience (Stage 9)
+#
+#   Rate limiter    RequestRateLimiter (Redis token bucket) per route, per user (or per IP when anonymous). 429 when empty.
+#                   Redis down => requests are let through (fail-open), the gateway never becomes the outage.
+#   Circuit breaker one breaker PER ROUTE (before: one shared breaker, so a failing payment-service also cut off products).
+#   Time limiter    per route (timelimiter.instances below) - the breaker's call is cancelled and answered by /fallback (504).
+#   Retry           ONE retry, GET only, only on connection errors / 502 / 503 / 504. Never for POST/PUT/DELETE.
+#   Bulkhead        gateway.httpclient.pool: at most 500 connections to services, waiting max 2 s for one.
+#
+#  Tune a limit: replenishRate = requests per second that refill, burstCapacity = how many can arrive at once.
+# =====================================================================================================================
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms            # rate limiting must never slow requests down
   cloud:
     gateway:
       discovery:
@@ -6,59 +23,421 @@ spring:
           enabled: true
           lower-case-service-id: true
       httpclient:
-        connect-timeout: 5000
-        response-timeout: 10s
-      default-filters:
-        - name: CircuitBreaker
-          args:
-            name: defaultCircuitBreaker
+        connect-timeout: 2000
+        response-timeout: 30s   # ceiling only; every route sets its own via metadata.response-timeout
+        pool:
+          type: FIXED
+          max-connections: 500
+          acquire-timeout: 2000
       routes:
+        # Login, OTP, registration, password reset: strict per-IP limit (brute force / OTP abuse). Only GET (/auth/me) is retried.
+        - id: auth-route
+          uri: lb://USER-SERVICE
+          predicates:
+            - Path=/api/v1/auth/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 2
+                redis-rate-limiter.burstCapacity: 10
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: authCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: user-service-route
           uri: lb://USER-SERVICE
           predicates:
-            # CHANGED: added /api/v1/sellers/** (seller register / profile / admin KYC review)
-            # NEW (Stage 4): /api/v1/delivery-agents/** (delivery partner apply / duty / admin review)
-            - Path=/api/v1/auth/**,/api/v1/user/**,/api/v1/address/**,/api/v1/sellers/**,/api/v1/delivery-agents/**
+            - Path=/api/v1/user/**,/api/v1/address/**,/api/v1/sellers/**,/api/v1/delivery-agents/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: userCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: notification-service-route
           uri: lb://NOTIFICATION-SERVICE
           predicates:
             - Path=/api/v1/notification/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: notificationCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
+        # Picture upload/serve: longer time limit than the rest of the catalogue (up to 8 pictures of 5 MB).
+        - id: product-images-route
+          uri: lb://PRODUCT-SERVICE
+          predicates:
+            - Path=/api/v1/product/*/images/**,/api/v1/product/images/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 32000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: productImagesCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: product-service-route
           uri: lb://PRODUCT-SERVICE
           predicates:
             - Path=/api/v1/product/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: productCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: category-service-route
           uri: lb://CATEGORY-SERVICE
           predicates:
             - Path=/api/v1/category/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: categoryCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: cart-service-route
           uri: lb://CART-SERVICE
           predicates:
             - Path=/api/v1/cart/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: cartCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: inventory-service-route
           uri: lb://INVENTORY-SERVICE
           predicates:
             - Path=/api/v1/inventory/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: inventoryCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
+        # Placing an order calls cart, coupon and user-service: more time, and a tighter per-user rate.
         - id: order-service-route
           uri: lb://ORDER-SERVICE
           predicates:
             - Path=/api/v1/order/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 17000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: orderCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
+        # Razorpay/Stripe call this: NO rate limit (their bursts are legitimate; the signature is the authentication) and no retry.
+        - id: payment-webhook-route
+          uri: lb://PAYMENT-SERVICE
+          predicates:
+            - Path=/api/v1/payment/webhooks/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 17000
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: paymentWebhookCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+        # Money: strict per-user rate, long time limit, reads only are retried.
         - id: payment-service-route
           uri: lb://PAYMENT-SERVICE
           predicates:
             - Path=/api/v1/payment/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 22000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 5
+                redis-rate-limiter.burstCapacity: 10
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: paymentCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: shipping-service-route
           uri: lb://SHIPPING-SERVICE
           predicates:
             - Path=/api/v1/shipping/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: shippingCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: coupon-service-route
           uri: lb://COUPON-SERVICE
           predicates:
             - Path=/api/v1/coupon/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: couponCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
         - id: review-service-route
           uri: lb://REVIEW-SERVICE
           predicates:
             - Path=/api/v1/review/**
+          metadata:
+            connect-timeout: 2000
+            response-timeout: 10000
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@routeUserOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+            - name: CircuitBreaker
+              args:
+                name: reviewCb
+                fallbackUri: forward:/fallback
+                statusCodes: 502,503,504
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT
+                exceptions: java.io.IOException
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
 
 eureka:
   client:
@@ -92,31 +471,89 @@ resilience4j:
     configs:
       default:
         registerHealthIndicator: true
-        sliding-window-type: COUNT_BASED
-        slidingWindowSize: 10
-        permittedNumberOfCallsInHalfOpenState: 3
-        waitDurationInOpenState: 5s
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
         failureRateThreshold: 50
-        automatic-transition-from-open-to-half-open-enabled: true
-        minimum-number-of-calls: 5
+        slowCallDurationThreshold: 5s
+        slowCallRateThreshold: 80
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
     instances:
-      defaultCircuitBreaker:
+      authCb:
+        baseConfig: default
+      userCb:
+        baseConfig: default
+      notificationCb:
+        baseConfig: default
+      productImagesCb:
+        baseConfig: default
+      productCb:
+        baseConfig: default
+      categoryCb:
+        baseConfig: default
+      cartCb:
+        baseConfig: default
+      inventoryCb:
+        baseConfig: default
+      orderCb:
+        baseConfig: default
+      paymentWebhookCb:
+        baseConfig: default
+      paymentCb:
+        baseConfig: default
+      shippingCb:
+        baseConfig: default
+      couponCb:
+        baseConfig: default
+      reviewCb:
         baseConfig: default
   timelimiter:
     configs:
       default:
-        timeoutDuration: 10s
-  retry:
-    configs:
-      default:
-        maxAttempts: 3
-        waitDuration: 2s
+        timeoutDuration: 8s
+        cancelRunningFuture: true
+    instances:
+      authCb:
+        timeoutDuration: 8s
+      userCb:
+        timeoutDuration: 8s
+      notificationCb:
+        timeoutDuration: 8s
+      productImagesCb:
+        timeoutDuration: 30s
+      productCb:
+        timeoutDuration: 8s
+      categoryCb:
+        timeoutDuration: 8s
+      cartCb:
+        timeoutDuration: 8s
+      inventoryCb:
+        timeoutDuration: 8s
+      orderCb:
+        timeoutDuration: 15s
+      paymentWebhookCb:
+        timeoutDuration: 15s
+      paymentCb:
+        timeoutDuration: 20s
+      shippingCb:
+        timeoutDuration: 8s
+      couponCb:
+        timeoutDuration: 8s
+      reviewCb:
+        timeoutDuration: 8s
+
+# Set to true ONLY when clients reach the gateway through a trusted reverse proxy / load balancer
+gateway:
+  rate-limit:
+    trust-forwarded-for: false
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,gateway
+        include: health,info,metrics,prometheus,gateway,circuitbreakers
   endpoint:
     health:
       show-details: always

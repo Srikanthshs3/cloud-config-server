@@ -26,6 +26,20 @@ spring:
     properties:
       schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
 
+  # ---- Stage 9: resilience of the Feign clients (cart-service, coupon-service) ----
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true                 # every Feign method gets a circuit breaker + the fallbackFactory
+        alphanumeric-ids:
+          enabled: true               # breaker names: CartApiClientgetUserCart, CouponApiClientredeem ...
+      client:
+        config:
+          default:
+            connectTimeout: 2000      # ms
+            readTimeout: 8000         # ms (placing an order is a user-facing action; do not wait longer)
+            loggerLevel: basic
+
 eureka:
   client:
     service-url:
@@ -69,3 +83,32 @@ logging:
     org.apache.kafka.clients.NetworkClient: ERROR
   pattern:
     level: "%5p [order-service,%X{traceId:-},%X{spanId:-}]"
+
+# ---- Stage 9: circuit breaker / time limiter for the Feign clients ------------------------------------------------
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # Feign 4xx = the other service answered "your request is wrong": not a sick dependency.
+        # (A list in a service file REPLACES the shared default list, so the shared entries are repeated here.)
+        ignoreExceptions:
+          - org.praskanth.exception.NotFoundException
+          - org.praskanth.exception.BadRequestException
+          - org.praskanth.exception.ConflictException
+          - org.praskanth.exception.ForbiddenOperationException
+          - org.praskanth.exception.UnauthorizedException
+          - org.praskanth.exception.TooManyRequestsException
+          - org.springframework.web.client.HttpClientErrorException
+          - io.github.resilience4j.bulkhead.BulkheadFullException
+          - feign.FeignException$BadRequest
+          - feign.FeignException$Unauthorized
+          - feign.FeignException$Forbidden
+          - feign.FeignException$NotFound
+          - feign.FeignException$Conflict
+          - feign.FeignException$UnprocessableEntity
+          - feign.FeignException$TooManyRequests
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 10s          # a little above readTimeout, so Feign's own timeout fires first and gives a clean error
+        cancelRunningFuture: true
