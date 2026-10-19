@@ -99,7 +99,6 @@ resilience4j:
           - org.praskanth.exception.UnauthorizedException
           - org.praskanth.exception.TooManyRequestsException
           - org.springframework.web.client.HttpClientErrorException
-          - io.github.resilience4j.bulkhead.BulkheadFullException
           - feign.FeignException$BadRequest
           - feign.FeignException$Unauthorized
           - feign.FeignException$Forbidden
