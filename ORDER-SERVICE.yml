@@ -7,7 +7,7 @@ spring:
   jpa:
     hibernate:
       # 'update' for local/dev only - use Flyway/Liquibase migrations before production.
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
