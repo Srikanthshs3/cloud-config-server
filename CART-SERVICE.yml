@@ -11,11 +11,11 @@ spring:
     password: Admin@123
   sql:
     init:
-      mode: always
+      mode: never
   jpa:
-    defer-datasource-initialization: true
+    defer-datasource-initialization: false
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
   properties:
     hibernate:
       dialect: org.hibernate.dialect.MySQLDialect
